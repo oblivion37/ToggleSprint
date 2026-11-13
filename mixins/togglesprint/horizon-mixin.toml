@@ -1,0 +1,164 @@
+[mod]
+id = "togglesprint"
+version = "1.0.0"
+priority = 100
+
+[compatibility]
+horizon_revision = "fdc87aecdbd116bf1e08adcd062fcbaea8c2e2ca"
+
+[[module]]
+id = "client"
+file = "crates/horizon-client/src/game.rs"
+name = "togglesprint_client"
+source = "togglesprint.rs"
+
+[[injection]]
+id = "advance"
+kind = "HEAD"
+target = "horizon_client::game::native_hooks::Game<'_>::native_frame"
+helper = "advance.rs"
+bindings = [
+  { name = "game", ty = "&mut crate::game::Game<'_>", value = "&mut *self" },
+]
+
+[[injection]]
+id = "draw"
+kind = "HEAD"
+target = "horizon_client::game::native_hooks::Game<'_>::native_hud"
+helper = "draw.rs"
+bindings = [
+  { name = "game", ty = "&crate::game::Game<'_>", value = "&*self" },
+  { name = "batch", ty = "&mut horizon_client::hud::HudBatch", value = "&mut *batch" },
+]
+
+[[injection]]
+id = "key_press"
+kind = "HEAD"
+target = "horizon_client::game::native_hooks::Game<'_>::native_key"
+helper = "key_press.rs"
+bindings = [
+  { name = "game", ty = "&mut crate::game::Game<'_>", value = "&mut *self" },
+  { name = "name", ty = "&str", value = "key" },
+  { name = "pressed", ty = "bool", value = "pressed" },
+]
+
+[[injection]]
+id = "menu_entry"
+kind = "HEAD"
+target = "horizon_client::game::native_hooks::Game<'_>::native_mods"
+helper = "menu_entry.rs"
+bindings = [
+  { name = "mods", ty = "&mut Vec<crate::game::native_hooks::NativeMod>", value = "&mut *mods" },
+]
+
+[[injection]]
+id = "menu_rows"
+kind = "HEAD"
+target = "horizon_client::game::native_hooks::Game<'_>::native_settings"
+helper = "menu_rows.rs"
+bindings = [
+  { name = "game", ty = "&crate::game::Game<'_>", value = "&*self" },
+  { name = "mod_id", ty = "&str", value = "mod_id" },
+  { name = "rows", ty = "&mut Vec<String>", value = "&mut *buttons" },
+]
+
+[[injection]]
+id = "menu_click"
+kind = "HEAD"
+target = "horizon_client::game::native_hooks::Game<'_>::native_settings_click"
+helper = "menu_click.rs"
+bindings = [
+  { name = "game", ty = "&mut crate::game::Game<'_>", value = "&mut *self" },
+  { name = "mod_id", ty = "&str", value = "mod_id" },
+  { name = "row", ty = "usize", value = "button" },
+]
+
+[[injection]]
+id = "sneak_mapping"
+kind = "MODIFY_EXPRESSION_VALUE"
+target = "horizon_client::game::play_input::Game<'_>::sync_toggle"
+helper = "sneak_mapping.rs"
+selector = "self.toggles.is_down(slot)"
+require = 1
+ordinal = 0
+bindings = [
+  { name = "game", ty = "&crate::game::Game<'_>", value = "&*self" },
+  { name = "slot", ty = "usize", value = "slot" },
+  { name = "vanilla_down", ty = "bool", value = "$value" },
+]
+
+[[injection]]
+id = "settings_layout"
+kind = "HEAD"
+cancellable = true
+target = "horizon_client_render::options_ui::OptionsUi::native_rows"
+helper = "native_rows.rs"
+bindings = [
+  { name = "options", ty = "&OptionsUi", value = "self" },
+  { name = "settings", ty = "&Settings", value = "s" },
+  { name = "index", ty = "usize", value = "i" },
+]
+
+[[injection]]
+id = "editor_draw"
+kind = "HEAD"
+cancellable = true
+target = "horizon_client::game::options::Game<'_>::draw_options"
+helper = "editor_draw.rs"
+bindings = [
+  { name = "game", ty = "&mut crate::game::Game<'_>", value = "&mut *self" },
+  { name = "batch", ty = "&mut horizon_client::hud::HudBatch", value = "&mut *batch" },
+]
+
+[[injection]]
+id = "editor_mouse"
+kind = "HEAD"
+cancellable = true
+target = "horizon_client::game::options::Game<'_>::options_mouse"
+helper = "editor_mouse.rs"
+bindings = [
+  { name = "game", ty = "&mut crate::game::Game<'_>", value = "&mut *self" },
+  { name = "pressed", ty = "bool", value = "pressed" },
+  { name = "right", ty = "bool", value = "right" },
+]
+
+[[injection]]
+id = "editor_drag"
+kind = "HEAD"
+cancellable = true
+target = "horizon_client::game::options::Game<'_>::options_drag"
+helper = "editor_drag.rs"
+bindings = [
+  { name = "game", ty = "&mut crate::game::Game<'_>", value = "&mut *self" },
+]
+
+[[injection]]
+id = "editor_key"
+kind = "HEAD"
+cancellable = true
+target = "horizon_client::game::options::Game<'_>::options_key"
+helper = "editor_key.rs"
+bindings = [
+  { name = "game", ty = "&mut crate::game::Game<'_>", value = "&mut *self" },
+  { name = "key", ty = "winit::keyboard::KeyCode", value = "key" },
+]
+
+[[injection]]
+id = "editor_scroll"
+kind = "HEAD"
+cancellable = true
+target = "horizon_client::game::options::Game<'_>::options_scroll"
+helper = "editor_scroll.rs"
+bindings = [
+  { name = "game", ty = "&mut crate::game::Game<'_>", value = "&mut *self" },
+]
+
+[[injection]]
+id = "editor_clear_background"
+kind = "HEAD"
+target = "horizon_client::game::native_hooks::Game<'_>::native_menu_background"
+helper = "editor_clear_background.rs"
+bindings = [
+  { name = "game", ty = "&crate::game::Game<'_>", value = "self" },
+  { name = "radius", ty = "&mut Option<f32>", value = "&mut *radius" },
+]
