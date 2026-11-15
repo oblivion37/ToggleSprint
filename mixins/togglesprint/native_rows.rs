@@ -9,36 +9,38 @@ fn sprint_settings_rows(
     let Some(page) = &entry.native else {
         return core::ops::ControlFlow::Continue(());
     };
+    let [hud_label, crouch_label] = page.buttons.as_slice() else {
+        return core::ops::ControlFlow::Continue(());
+    };
+    let [[name, _, default]] = page.keys.as_slice() else {
+        return core::ops::ControlFlow::Continue(());
+    };
 
-    let mut rows = vec![Row::Note(entry.title.clone())];
-    for (row, label) in page.buttons.iter().enumerate() {
-        rows.push(Row::Buttons(
-            button(0.0, 0.0, 310.0, Text::literal(label.clone()), Act::NativeButton(index, row)),
-            None,
-        ));
+    let enabled = crouch_label == "ToggleCrouch: ON";
+    let binding = settings
+        .mods
+        .keys
+        .get(&entry.id)
+        .and_then(|keys| keys.get(name))
+        .unwrap_or(default);
+    let mut message = keybinds::display_name(binding);
+    if enabled && options.selected_native_key == Some((index, 0)) {
+        message = Text::literal("> ")
+            .append(message.with_color(text::WHITE))
+            .append(" <")
+            .with_color(text::YELLOW);
     }
-    // The native settings API provides the toggle state through its button label.
-    let crouch_enabled = page.buttons.get(1).is_some_and(|label| label == "ToggleCrouch: ON");
-    for (row, [name, label, default]) in page.keys.iter().enumerate() {
-        let binding = settings
-            .mods
-            .keys
-            .get(&entry.id)
-            .and_then(|keys| keys.get(name))
-            .unwrap_or(default);
-        let binding = keybinds::display_name(binding);
-        let active = name != "toggle_crouch" || crouch_enabled;
-        let message = if active && options.selected_native_key == Some((index, row)) {
-            Text::literal(format!("{label}: > {} <", binding.plain())).with_color(text::YELLOW)
-        } else {
-            Text::literal(format!("{label}: {}", binding.plain()))
-        };
-        let widget = if active {
-            button(0.0, 0.0, 310.0, message, Act::NativeKey(index, row))
-        } else {
-            inactive(button(0.0, 0.0, 310.0, message, Act::None))
-        };
-        rows.push(Row::Buttons(widget, None));
-    }
-    core::ops::ControlFlow::Break(rows)
+
+    let hud = button(0.0, 0.0, 310.0, Text::literal(hud_label.clone()), Act::NativeButton(index, 0));
+    let crouch = button(0.0, 0.0, 150.0, Text::literal(crouch_label.clone()), Act::NativeButton(index, 1));
+    let key = if enabled {
+        button(0.0, 0.0, 150.0, message, Act::NativeKey(index, 0))
+    } else {
+        inactive(button(0.0, 0.0, 150.0, message, Act::None))
+    };
+    core::ops::ControlFlow::Break(vec![
+        Row::Note(entry.title.clone()),
+        Row::Buttons(hud, None),
+        Row::Buttons(crouch, Some(key)),
+    ])
 }

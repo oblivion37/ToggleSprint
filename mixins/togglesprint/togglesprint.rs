@@ -13,7 +13,7 @@ pub(super) mod editor {
     use horizon_client::{
         extras::Corner,
         hud::HudBatch,
-        hud_layout::{self, HotbarInputs},
+        hud_layout::{self, HealthHud, HealthInputs, HeartKind, HotbarInputs},
         options_ui::Page,
         pvp_hud,
         text::Text,
@@ -233,8 +233,9 @@ pub(super) mod editor {
         }
     }
 
-    fn draw_hotbar(game: &Game<'_>, batch: &mut HudBatch) {
-        let inputs = HotbarInputs {
+    fn draw_hud_preview(game: &Game<'_>, batch: &mut HudBatch) {
+        let (width, height) = (batch.width as i32, batch.height as i32);
+        let hotbar = HotbarInputs {
             selected: game.selected.min(8) as i32,
             right_handed: !game.settings.main_hand_left,
             offhand: false,
@@ -242,7 +243,31 @@ pub(super) mod editor {
             offhand_pop: 0.0,
             attack: None,
         };
-        let draws = hud_layout::hotbar(batch.width as i32, batch.height as i32, &inputs);
+        // Use fixed survival values so the preview is available outside a world.
+        let health = HealthInputs {
+            tick: 0,
+            millis: 0,
+            health: 20.0,
+            max_health: 20.0,
+            absorption: 0.0,
+            armor: 0,
+            food: 20,
+            saturation: 5.0,
+            kind: HeartKind::Normal,
+            regeneration: false,
+            hunger: false,
+            hardcore: false,
+            damage_cooldown: false,
+            air: 300,
+            max_air: 300,
+            under_water: false,
+            vehicle_hearts: 0,
+        };
+        let mut draws = hud_layout::hotbar(width, height, &hotbar);
+        draws.extend(HealthHud::default().layout(&health, width, height));
+        draws.extend(hud_layout::experience(width, height, 0.5, 10, true, &|text| {
+            game.native_text_width(text) as i32
+        }));
         hud_layout::paint(batch, &game.gui.atlas, &draws);
     }
 
@@ -256,7 +281,7 @@ pub(super) mod editor {
         let layout = preferences(game).layout;
         let drag = SESSION.with_borrow(|session| session.editor.as_ref().and_then(|editor| editor.drag));
         widgets::begin_screen(|| widgets::ScreenInfo::new("options/togglesprint/hud_position", "HUD"));
-        draw_hotbar(game, batch);
+        draw_hud_preview(game, batch);
 
         let preview = preview(layout, screen, width);
         let [reset, size, done] = toolbar(screen, preview, drag);
@@ -391,6 +416,8 @@ const DEFAULT_KEY: &str = "key.keyboard.c";
 const LABEL: &str = "Sprint";
 const SETTLED_SCALE: f32 = 1.22;
 const PEAK_SCALE: f32 = 1.35;
+const RISE_MS: f32 = 65.0;
+const POP_MS: f32 = 190.0;
 
 #[derive(Clone, Copy)]
 struct Preferences {
@@ -398,9 +425,49 @@ struct Preferences {
     crouch_enabled: bool,
 }
 
+struct SprintPop {
+    elapsed_ms: f32,
+    last_frame: Option<Instant>,
+    active: bool,
+}
+
+impl SprintPop {
+    const HIDDEN: Self = Self { elapsed_ms: 0.0, last_frame: None, active: false };
+
+    fn update(&mut self, now: Instant, active: bool) {
+        let previous = self.last_frame.replace(now);
+        if let Some(previous) = previous {
+            // On a toggle, reverse from the last rendered position.
+            if self.active == active {
+                let step = now.duration_since(previous).as_secs_f32() * 1000.0;
+                let direction = if active { 1.0 } else { -1.0 };
+                self.elapsed_ms = (self.elapsed_ms + direction * step).clamp(0.0, POP_MS);
+            }
+        } else if !active {
+            // An open screen can release the sprint mapping temporarily.
+            self.elapsed_ms = 0.0;
+        }
+        self.active = active;
+    }
+
+    fn suspend(&mut self) {
+        self.last_frame = None;
+        if !self.active {
+            self.elapsed_ms = 0.0;
+        }
+    }
+
+    fn scale(&self, sprint_on: bool) -> Option<f32> {
+        if !sprint_on && (self.active || self.elapsed_ms == 0.0) {
+            return None;
+        }
+        Some(self.last_frame.map_or(SETTLED_SCALE, |_| eased_scale(self.elapsed_ms)))
+    }
+}
+
 struct ClientSession {
     preferences: Option<Preferences>,
-    sprint_since: Option<Instant>,
+    sprint_pop: SprintPop,
     latched_binding: Option<String>,
     editor: Option<editor::Editor>,
 }
@@ -408,7 +475,7 @@ struct ClientSession {
 thread_local! {
     static SESSION: RefCell<ClientSession> = const { RefCell::new(ClientSession {
         preferences: None,
-        sprint_since: None,
+        sprint_pop: SprintPop::HIDDEN,
         latched_binding: None,
         editor: None,
     }) };
@@ -462,14 +529,16 @@ pub(super) fn update_frame(game: &mut Game<'_>) {
     let sprint_toggle = game.settings.toggle_sprint;
     let needs_crouch_sync = SESSION.with_borrow_mut(|session| {
         if !enabled || !in_world {
-            session.sprint_since = None;
+            session.sprint_pop = SprintPop::HIDDEN;
             return session.latched_binding.take().is_some();
         }
 
-        if !sprint_toggle || (ready && !game.toggles.is_down(SPRINT)) {
-            session.sprint_since = None;
+        if !sprint_toggle {
+            session.sprint_pop = SprintPop::HIDDEN;
         } else if ready {
-            session.sprint_since.get_or_insert_with(Instant::now);
+            session.sprint_pop.update(Instant::now(), game.toggles.is_down(SPRINT));
+        } else {
+            session.sprint_pop.suspend();
         }
 
         let Some(binding) = session.latched_binding.as_deref() else {
@@ -521,32 +590,29 @@ pub(super) fn logical_key(game: &Game<'_>, slot: usize, vanilla_down: bool) -> b
 }
 
 fn eased_scale(elapsed_ms: f32) -> f32 {
-    let (start, end, fraction) = if elapsed_ms <= 65.0 {
-        (1.04, PEAK_SCALE, elapsed_ms / 65.0)
+    let (start, end, fraction) = if elapsed_ms <= RISE_MS {
+        (1.04, PEAK_SCALE, elapsed_ms / RISE_MS)
     } else {
-        (PEAK_SCALE, SETTLED_SCALE, ((elapsed_ms - 65.0) / 125.0).min(1.0))
+        (PEAK_SCALE, SETTLED_SCALE, ((elapsed_ms - RISE_MS) / (POP_MS - RISE_MS)).min(1.0))
     };
     let weight = fraction * fraction * (3.0 - 2.0 * fraction);
     start * (1.0 - weight) + end * weight
 }
 
 pub(super) fn paint(game: &Game<'_>, batch: &mut HudBatch) {
-    if !game.native_on(MOD_ID)
-        || !ready(game)
-        || !game.settings.toggle_sprint
-        || !game.toggles.is_down(SPRINT)
-    {
+    if !game.native_on(MOD_ID) || !ready(game) || !game.settings.toggle_sprint {
         return;
     }
+    let sprint_on = game.toggles.is_down(SPRINT);
+    let scale = SESSION.with_borrow(|session| session.sprint_pop.scale(sprint_on));
+    let Some(scale) = scale else {
+        return;
+    };
     let layout = preferences(game).layout;
     if layout.corner().is_some_and(|corner| !game.native_corner_shown(corner)) {
         return;
     }
-    let since = SESSION.with_borrow(|session| session.sprint_since);
-    let pulse = since.map_or(1.0, |start| {
-        eased_scale(start.elapsed().as_secs_f32() * 1000.0) / SETTLED_SCALE
-    });
-    paint_label(game, batch, layout, layout.scale() * pulse);
+    paint_label(game, batch, layout, layout.scale() * (scale / SETTLED_SCALE));
 }
 
 fn paint_label(game: &Game<'_>, batch: &mut HudBatch, layout: editor::Layout, scale: f32) {

@@ -1,10 +1,10 @@
 [mod]
 id = "togglesprint"
-version = "1.0.0"
+version = "1.0.1"
 priority = 100
 
 [compatibility]
-horizon_revision = "fdc87aecdbd116bf1e08adcd062fcbaea8c2e2ca"
+horizon_revision = "9f42064c11efe7ef3e5ed2baad7ddc2a3b36eea0"
 
 [[module]]
 id = "client"
@@ -91,12 +91,23 @@ bindings = [
 id = "settings_layout"
 kind = "HEAD"
 cancellable = true
-target = "horizon_client_render::options_ui::OptionsUi::native_rows"
+target = "horizon_client_render::options_ui::pages::OptionsUi::native_rows"
 helper = "native_rows.rs"
 bindings = [
   { name = "options", ty = "&OptionsUi", value = "self" },
   { name = "settings", ty = "&Settings", value = "s" },
   { name = "index", ty = "usize", value = "i" },
+]
+
+[[injection]]
+id = "settings_widths"
+kind = "RETURN"
+target = "horizon_client_render::options_ui::OptionsUi::layout"
+helper = "settings_widths.rs"
+bindings = [
+  { name = "layout", ty = "(Vec<Widget>, f32, f32, f32)", value = "$value" },
+  { name = "options", ty = "&OptionsUi", value = "&*self" },
+  { name = "settings", ty = "&Settings", value = "s" },
 ]
 
 [[injection]]
